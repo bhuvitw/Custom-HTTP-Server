@@ -128,9 +128,12 @@ func main() {
 	// for i := 0; i < 10; i++ {
 	// 	fmt.Println(i)
 	// }
-	var myString = "resume"
-	var indexed = myString[0]
-	fmt.Printf("%v, %T", indexed, indexed)
+	// var myString = "resume"
+	// var indexed = myString[0]
+	// fmt.Printf("%v, %T", indexed, indexed)
+	fmt.Println("start")
+	defer fmt.Println("delayed by defer")
+	fmt.Println("end")
 }
 
 // func printMe(printValue string) {
