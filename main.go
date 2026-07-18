@@ -8,6 +8,13 @@ import (
 	"strings"
 )
 
+type HTTPRequest struct {
+	Method  string
+	Path    string
+	Version string
+	Headers map[string]string
+}
+
 func main() {
 	listener, err := net.Listen("tcp", "localhost:8080")
 
@@ -19,7 +26,6 @@ func main() {
 	fmt.Println("localhost:8080 online")
 
 	for {
-		header := make(map[string]string)
 		conn, err := listener.Accept()
 
 		if err != nil {
@@ -42,28 +48,15 @@ func main() {
 
 		fmt.Printf("Recieved: Request: \n%s\n", string(requestedarr))
 
-		data := strings.Split(string(requestedarr), "\r\n")
-
-		firstLine := strings.Split(string(data[0]), " ")
-
-		for i := 1; i < len(data); i++ {
-			if data[i] == "" {
-				break
-			}
-			saver(header, string(data[i]))
-		}
-
-		fmt.Println("firstLine: ", firstLine)
-
-		fmt.Println("map: ", header)
+		m, err := ParseRequest(requestedarr)
 
 		var response []byte
 
-		if firstLine[1] == "/profile.html" {
+		if m.Path == "/profile.html" {
 			response = []byte("HTTP/1.1 200 OK\r\n\r\nWelcome to Bhuvi's Profile\n")
-		} else if firstLine[1] == "/" {
+		} else if m.Path == "/" {
 			response = []byte("HTTP/1.1 200 OK\r\n\r\nHello World\n")
-		} else if firstLine[1] == "/index.html" {
+		} else if m.Path == "/index.html" {
 			content, err := os.ReadFile("index.html")
 			if err != nil {
 				fmt.Println("Error Reading index.html", err)
@@ -72,6 +65,21 @@ func main() {
 			} else {
 				headerString := fmt.Sprintf(
 					"HTTP/1.1 200 OK\r\nContent-Type:text/html\r\nContent-Length: %d\r\n\r\n",
+					len(content),
+				)
+
+				response = append([]byte(headerString), content...)
+			}
+
+		} else if m.Path == "/quote.png" {
+			content, err := os.ReadFile("quote.png")
+			if err != nil {
+				fmt.Println("Error Reading quote.png", err)
+
+				response = []byte("HTTP/1.1 404 Internal Server Error\r\n\r\nCount not load image")
+			} else {
+				headerString := fmt.Sprintf(
+					"HTTP/1.1 200 OK\r\nContent-Type:image/png\r\nContent-Length: %d\r\n\r\n",
 					len(content),
 				)
 
@@ -90,14 +98,33 @@ func main() {
 
 }
 
+func ParseRequest(rawData []byte) (*HTTPRequest, error) {
+	data := strings.Split(string(rawData), "\r\n")
+
+	firstLine := strings.Split(string(data[0]), " ")
+
+	var self HTTPRequest
+
+	self.Method = firstLine[0]
+	self.Path = firstLine[1]
+	self.Version = firstLine[2]
+
+	header := make(map[string]string)
+
+	for i := 1; i < len(data); i++ {
+		if data[i] == "" {
+			break
+		}
+		saver(header, string(data[i]))
+	}
+
+	self.Headers = header
+
+	return &self, nil
+
+}
+
 func saver(header map[string]string, content string) {
 	ans := strings.SplitN(content, ":", 2)
 	header[ans[0]] = ans[1]
-
-	// fmt.Println(header)
-}
-
-func spliter(content string) {
-	// fmt.Printf("%q\n", strings.Split("a,b,c", ","))
-	fmt.Println("%q\n ", strings.Split(content, " "))
 }
