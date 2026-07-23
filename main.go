@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
+	"mime"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -14,6 +17,7 @@ type HTTPRequest struct {
 	Path    string
 	Version string
 	Headers map[string]string
+	Body    []byte
 }
 
 func main() {
@@ -38,15 +42,20 @@ func main() {
 		for {
 			n, err := conn.Read(buf)
 			if err != nil {
-				fmt.Println("Error: ", err)
+				if errors.Is(err, io.EOF) {
+					fmt.Println("Client Closed Connection")
+				} else {
+					fmt.Println("Error: ", err)
+				}
+				break
 			}
 			requestedarr = append(requestedarr, buf[:n]...)
 
-			if (len(requestedarr) / 1024) > 4000 {
+			if len(requestedarr) > 8192 {
 				break
 			}
 			if bytes.Contains(requestedarr, []byte("\r\n\r\n")) {
-				break
+
 			}
 		}
 
@@ -57,6 +66,7 @@ func main() {
 		if err != nil {
 			fmt.Println("Error: ", err)
 			conn.Close()
+			continue
 		}
 
 		response := Router(m)
@@ -71,50 +81,61 @@ func main() {
 
 func Router(m *HTTPRequest) []byte {
 
-	var response []byte
-
-	if m.Path == "/profile.html" {
-		response = []byte("HTTP/1.1 200 OK\r\n\r\nWelcome to Bhuvi's Profile\n")
-	} else if m.Path == "/" {
-		response = []byte("HTTP/1.1 200 OK\r\n\r\nHello World\n")
-	} else if m.Path == "/index.html" {
-		content, err := os.ReadFile("index.html")
-		if err != nil {
-			fmt.Println("Error Reading index.html", err)
-
-			response = []byte("HTTP/1.1 404 Internarl Server Error\r\n\r\nCould not load File")
-		} else {
-			headerString := fmt.Sprintf(
-				"HTTP/1.1 200 OK\r\nContent-Type:text/html\r\nContent-Length: %d\r\n\r\n",
-				len(content),
-			)
-
-			response = append([]byte(headerString), content...)
-		}
-
-	} else if m.Path == "/quote.png" {
-		content, err := os.ReadFile("quote.png")
-		if err != nil {
-			fmt.Println("Error Reading quote.png", err)
-
-			response = []byte("HTTP/1.1 404 Internal Server Error\r\n\r\nCount not load image")
-		} else {
-			headerString := fmt.Sprintf(
-				"HTTP/1.1 200 OK\r\nContent-Type:image/png\r\nContent-Length: %d\r\n\r\n",
-				len(content),
-			)
-
-			response = append([]byte(headerString), content...)
-		}
+	if m.Path == "/" {
+		body := []byte("Hello World\n")
+		header := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n", len(body))
+		return append([]byte(header), body...)
 	}
 
+	if m.Method == "POST" && m.Path == "/echo" {
+		body := m.Body
+		header := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContnet-Length: %d\r\n\r\n", len(body))
+		return append([]byte(header), body...)
+	}
+	filePath := strings.TrimPrefix(m.Path, "/")
+
+	content, err := os.ReadFile(filePath)
+
+	if err != nil {
+		if os.IsNotExist(err) {
+			body := []byte("404 Page Not Found")
+			header := fmt.Sprintf("HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n", len(body))
+			return append([]byte(header), body...)
+		}
+
+		body := []byte("500 Internal Server Error")
+
+		header := fmt.Sprintf("HTTP/1.1 500 Internal Server Error\r\n\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n", len(body))
+		return append([]byte(header), body...)
+	}
+
+	ext := filepath.Ext(filePath)
+
+	contentType := mime.TypeByExtension(ext)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	headerString := fmt.Sprintf(
+		"HTTP/1.1 200 Ok\r\n"+
+			"Content-Type: %s\r\n"+
+			"Content-Length: %d\r\n"+
+			"Connection: close\r\n\r\n",
+		contentType,
+		len(content),
+	)
+
+	response := append([]byte(headerString), content...)
+
 	return response
+
 }
 
 func ParseRequest(rawData []byte) (*HTTPRequest, error) {
-	data := strings.Split(string(rawData), "\r\n")
+	data := strings.Split(string(rawData), "\r\n\r\n")
+	Head := strings.Split(string(data[0]), "\r\n")
 
-	firstLine := strings.Split(string(data[0]), " ")
+	firstLine := strings.Split(string(Head[0]), " ")
 
 	if len(firstLine) != 3 {
 		return nil, errors.New("first line length is not correct")
@@ -125,6 +146,7 @@ func ParseRequest(rawData []byte) (*HTTPRequest, error) {
 	self.Method = firstLine[0]
 	self.Path = firstLine[1]
 	self.Version = firstLine[2]
+	self.Body = []byte(data[1])
 
 	header := make(map[string]string)
 
@@ -143,5 +165,5 @@ func ParseRequest(rawData []byte) (*HTTPRequest, error) {
 
 func saver(header map[string]string, content string) {
 	ans := strings.SplitN(content, ":", 2)
-	header[strings.TrimSpace(ans[0])] = strings.TrimSpace(ans[1])
+	header[strings.TrimSpace(strings.ToLower(ans[0]))] = strings.TrimSpace(ans[1])
 }
